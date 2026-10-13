@@ -149,3 +149,15 @@ spool 파일 형식:
 - 그래서 hook이 `SessionStart` 때마다 `~/.session-monitor/bin/session-monitor`를 현재 버전의 `session-monitor.sh`로 향하는 심볼릭 링크로 갱신한다.
 - 다른 스킬은 이 경로를 실행 구문과 `allowed-tools`에 쓴다 (README 참고). 실제로 다른 플러그인 스킬에서 등록되는 것을 확인했다.
 - 이 경로는 `SESSION_MONITOR_HOME`을 따르므로, 저장 위치를 바꾸면 링크 위치도 바뀐다.
+
+## D13. 앱 코어: spool을 앱 저장소로 옮기고, 생존 확인은 시작 시각까지 본다
+
+- **저장소**: 등록 세션의 상태와 타임라인(최근 300건)은 `~/Library/Application Support/SessionMonitor/sessions.json`에 저장한다.
+  - spool 파일은 이 저장이 끝난 뒤에 지운다. 그래서 앱이 중간에 죽어도 이벤트를 다시 적용할 수는 있어도 잃지는 않는다.
+  - 미등록 세션은 `seen/`에서 매번 다시 계산하고 저장하지 않는다. 종료된 지 24시간이 지난 seen 파일은 앱이 지운다.
+- **갱신**: `~/.session-monitor`를 FSEvents로 감시하고, 5초마다 타이머로도 갱신한다. 타이머는 생존 확인과, FSEvents를 놓쳤을 때를 대비한 것이다.
+- **생존 확인**: 아래 둘 중 하나면 "종료(processGone)"로 처리한다. pid 재사용을 막기 위해서다.
+  - `kill(pid, 0)`으로 프로세스가 없다고 확인될 때
+  - 프로세스는 있지만 그 시작 시각(`sysctl KERN_PROC_PID`)이 이 pid로 처음 받은 이벤트 시각 + 5초보다 늦을 때 (다른 프로세스가 같은 pid를 받은 경우)
+- **상태 머신**: `SessionReducer`는 순수 함수로 테스트한다. 종료된 세션은 `SessionStart`(resume)나 `UserPromptSubmit`이 와야만 되살아나고, 늦게 도착한 async 이벤트는 무시한다.
+- **테스트 격리**: 단위 테스트는 앱을 test host로 실행한다. 이때 앱이 실제 `~/.session-monitor`를 만들지 않도록 테스트 환경에서는 임시 경로를 쓴다.

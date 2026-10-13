@@ -8,4 +8,6 @@ app/*.xcodeproj/
 # Release artifacts
 dist/
 *.dmg
+# Signing material — never commit
 *.p12
+*.cer

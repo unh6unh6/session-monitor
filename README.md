@@ -50,6 +50,12 @@ allowed-tools: Bash(~/.session-monitor/bin/session-monitor *)
 ### 개발
 
 ```sh
+# 앱 (app/)
+cd app && xcodegen generate                          # 파일 추가/삭제 후. .xcodeproj는 커밋하지 않음
+xcodebuild test -scheme SessionMonitor -destination 'platform=macOS' -derivedDataPath build/DerivedData
+xcodebuild -scheme SessionMonitor -configuration Debug -derivedDataPath build/DerivedData build
+
+# 플러그인
 plugin/tests/run.sh                                  # 스크립트 테스트
 claude --plugin-dir ./plugin                         # 로컬 플러그인으로 실행
 SESSION_MONITOR_HOME=/tmp/sm claude --plugin-dir ./plugin   # 저장 위치 바꿔서 실행

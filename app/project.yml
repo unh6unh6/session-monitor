@@ -1,0 +1,61 @@
+name: SessionMonitor
+options:
+  bundleIdPrefix: io.github.unh6unh6
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    # Shared self-signed cert (same as SpaceSwitcher) so permission grants survive rebuilds.
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: "SpaceSwitcher Signing"
+    DEVELOPMENT_TEAM: ""
+
+targets:
+  SessionMonitor:
+    type: application
+    platform: macOS
+    sources: [SessionMonitor]
+    info:
+      path: SessionMonitor/Resources/Info.plist
+      properties:
+        CFBundleDisplayName: Session Monitor
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        LSUIElement: true
+        LSMinimumSystemVersion: "$(MACOSX_DEPLOYMENT_TARGET)"
+        NSHumanReadableCopyright: ""
+    entitlements:
+      path: SessionMonitor/Resources/SessionMonitor.entitlements
+      properties:
+        com.apple.security.app-sandbox: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.unh6unh6.SessionMonitor
+        ENABLE_HARDENED_RUNTIME: NO
+
+  SessionMonitorTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources: [SessionMonitorTests]
+    dependencies:
+      - target: SessionMonitor
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.unh6unh6.SessionMonitorTests
+        GENERATE_INFOPLIST_FILE: YES
+        BUNDLE_LOADER: "$(TEST_HOST)"
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/SessionMonitor.app/Contents/MacOS/SessionMonitor"
+
+schemes:
+  SessionMonitor:
+    build:
+      targets:
+        SessionMonitor: all
+        SessionMonitorTests: [test]
+    test:
+      targets: [SessionMonitorTests]
