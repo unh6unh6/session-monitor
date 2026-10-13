@@ -1,0 +1,11 @@
+.DS_Store
+# Xcode
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+app/*.xcodeproj/
+# Release artifacts
+dist/
+*.dmg
+*.p12
