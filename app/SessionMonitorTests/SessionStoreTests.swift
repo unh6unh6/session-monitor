@@ -111,6 +111,25 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(transitions.map(\.1), [.working, .ended(.processGone)])
     }
 
+    func testResumeInNewProcessRevivesEndedSession() throws {
+        try makeRegistered()
+        try spool("UserPromptSubmit", file: "1.json", extra: ["prompt": "first"], mtime: 1)
+        try spool("SessionEnd", file: "2.json", extra: ["reason": "prompt_input_exit"], mtime: 2)
+        let store = makeStore()
+        store.refresh()
+        XCTAssertEqual(store.sessions[Fixture.sessionA]?.state, .ended(.exit(reason: "prompt_input_exit")))
+
+        // `claude --resume` starts a new process with the same session id.
+        probe.alive = [5000]
+        try spool("SessionStart", file: "3.json", pid: 5000, extra: ["source": "resume"], mtime: 3)
+        store.refresh()
+        let session = try XCTUnwrap(store.sessions[Fixture.sessionA])
+        XCTAssertEqual(session.state, .idle)
+        XCTAssertEqual(session.process?.pid, 5000)
+        XCTAssertEqual(session.group, "이슈A")
+        XCTAssertEqual(session.lastPrompt, "first", "history carries over")
+    }
+
     func testSeenSessionsAreUnregisteredAndRegisterMovesThem() throws {
         try fm.createDirectory(at: files.seenDir, withIntermediateDirectories: true)
         try Fixture.record("UserPromptSubmit", Fixture.sessionB, extra: ["prompt": "hi"])

@@ -115,11 +115,16 @@ private struct SessionList: View {
         let item = navigation.sidebar ?? .all
         let sessions = item.sessions(in: store, includeEnded: showEnded || item == .unregistered)
         List(selection: $navigation.sessionID) {
-            ForEach(sessions) { session in
-                SessionRow(session: session, showsGroup: item == .all)
-                    .tag(session.id)
-                    .draggable(session.id)
-                    .contextMenu { SessionActions(session: session, store: store, navigation: navigation) }
+            if item == .all {
+                ForEach(SessionSection.byGroup(sessions)) { section in
+                    Section {
+                        rows(section.sessions)
+                    } header: {
+                        Text("\(section.title) · \(section.sessions.count)")
+                    }
+                }
+            } else {
+                rows(sessions)
             }
         }
         .overlay {
@@ -132,5 +137,14 @@ private struct SessionList: View {
             }
         }
         .navigationTitle(item.title)
+    }
+
+    private func rows(_ sessions: [Session]) -> some View {
+        ForEach(sessions) { session in
+            SessionRow(session: session, showsGroup: false)
+                .tag(session.id)
+                .draggable(session.id)
+                .contextMenu { SessionActions(session: session, store: store, navigation: navigation) }
+        }
     }
 }

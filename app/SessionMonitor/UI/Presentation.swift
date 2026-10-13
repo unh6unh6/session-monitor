@@ -109,6 +109,27 @@ enum SidebarItem: Hashable {
     }
 }
 
+/// A group's sessions as shown under one header in the "전체" list.
+struct SessionSection: Identifiable, Equatable {
+    /// nil for 미분류.
+    let group: String?
+    let sessions: [Session]
+
+    var id: String { group.map { "group:\($0)" } ?? "ungrouped" }
+    var title: String { group ?? SidebarItem.ungroupedLabel }
+
+    /// Splits sessions by group: groups by name, 미분류 last, display order inside each.
+    static func byGroup(_ sessions: [Session]) -> [SessionSection] {
+        let grouped = Dictionary(grouping: sessions, by: \.group)
+        let names = grouped.keys.compactMap { $0 }.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+        var sections = names.map { SessionSection(group: $0, sessions: grouped[$0]!.sorted(by: Session.displayOrder)) }
+        if let ungrouped = grouped[nil] {
+            sections.append(SessionSection(group: nil, sessions: ungrouped.sorted(by: Session.displayOrder)))
+        }
+        return sections
+    }
+}
+
 /// Counts for the menu bar badge.
 struct StatusSummary: Equatable {
     var needsResponse = 0

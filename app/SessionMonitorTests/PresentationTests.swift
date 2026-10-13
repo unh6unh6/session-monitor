@@ -23,6 +23,20 @@ final class PresentationTests: XCTestCase {
         XCTAssertEqual(sessions.sorted(by: Session.displayOrder).map(\.id), ["d", "e", "c", "a", "b"])
     }
 
+    func testSectionsByGroupSortNamesAndPutUngroupedLast() {
+        let sections = SessionSection.byGroup([
+            session("a", .idle, updated: 5, group: "이슈B"),
+            session("b", .working, updated: 1),
+            session("c", .idle, updated: 9, group: "이슈A"),
+            session("d", .needsResponse(.question), updated: 0, group: "이슈B"),
+            session("e", .idle, updated: 3, group: "미분류"),
+        ])
+        XCTAssertEqual(sections.map(\.title), ["미분류", "이슈A", "이슈B", "미분류"])
+        XCTAssertEqual(Set(sections.map(\.id)).count, 4, "a group literally named 미분류 doesn't collide")
+        XCTAssertEqual(sections[2].sessions.map(\.id), ["d", "a"])
+        XCTAssertNil(sections[3].group)
+    }
+
     func testDisplayTitleFallbacks() {
         var s = session("abcdef0123", .idle)
         XCTAssertEqual(s.displayTitle, "abcdef01")
