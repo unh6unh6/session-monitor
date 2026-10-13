@@ -79,9 +79,37 @@ PreToolUse(AskUserQuestion) → PermissionRequest(AskUserQuestion) [즉시] → 
   - `CGEvent.postToPid`로 보낸 `Cmd+Shift+[`도 반영되지 않았다.
 - **결론**: MVP는 Warp 활성화 + 창 선택(+ Space 전환)까지 구현한다. 탭/pane 단위는 #1에서 전역 키 입력과 제목 매칭 순회 방식을 계속 조사한다.
 
-## D8. 이벤트 파일 스키마 (v1)
+## D8. 이벤트 파일 스키마 (v1) — D9로 대체됨
 
-`~/.session-monitor/events/<session_id>.jsonl`, 한 줄에 하나:
+append-only JSONL(`events/<session_id>.jsonl`) 방식이었으나 동시 쓰기 문제로 D9의 spool 방식으로 바꿨다.
+
+## D9. 저장 구조: 이벤트는 spool, 등록 정보는 값별 파일
+
+- **문제**:
+  - 한 세션에서도 hook이 동시에 실행된다 (async `PostToolUse`, 병렬 서브에이전트).
+  - 셸의 `>>` append는 긴 데이터(`last_assistant_message`, 긴 프롬프트)를 write() 한 번으로 쓴다는 보장이 없어 줄이 섞일 수 있다.
+  - 등록 정보 하나의 JSON을 스킬과 앱이 동시에 수정하면 한쪽 변경이 유실될 수 있다.
+- **결정**: 아래 구조를 쓴다.
+
+```
+~/.session-monitor/
+├── spool/<session_id>/<ts>-<pid>-<rand>.json   이벤트 1건 = 파일 1개 (hook이 .tmp에 쓰고 rename)
+├── sessions/<session_id>/                      이 디렉토리가 있으면 "등록됨"
+│   ├── group                                   그룹 이름 (스킬, 앱)
+│   ├── recap.md                                recap (스킬)
+│   └── meta.json                               등록 시각, previous(clear 이전 session_id) (등록 시 1회)
+├── seen/<session_id>.json                      미등록 세션의 최신 이벤트 1건 (tmp + rename으로 덮어쓰기)
+└── pids/<claude_pid>                           현재 session_id (tmp + rename)
+```
+
+- **쓰기 규칙**: 모든 쓰기는 같은 디렉토리의 임시 파일에 쓰고 `mv`(rename)로 교체한다. 그래서 읽는 쪽은 완성된 파일만 본다.
+- **앱의 처리**:
+  - spool 파일을 이름 순(타임스탬프)으로 읽어 앱 저장소(Application Support)에 반영하고 삭제한다.
+  - 앱이 꺼져 있으면 spool에 쌓였다가 다음 실행 때 처리된다.
+- **순서 역전 대응**: async `PostToolUse`가 `Stop`보다 늦게 기록될 수 있다. 그래서 `PostToolUse`는 "응답 필요 → 생성중" 전이에만 쓰고 다른 상태에서는 무시한다.
+- **삭제 순서**: 앱이 세션을 지울 때는 `sessions/<id>/`를 먼저 지운다. 그 뒤에 오는 hook은 미등록으로 판단해 spool에 쓰지 않는다.
+
+spool 파일 형식:
 
 ```json
 {"schema":1,"ts":"2026-10-13T22:54:50+09:00","pid":63748,"tty":"ttys003",
@@ -89,12 +117,11 @@ PreToolUse(AskUserQuestion) → PermissionRequest(AskUserQuestion) [즉시] → 
  "input":{ /* hook stdin 원본 JSON */ }}
 ```
 
-`~/.session-monitor/sessions/<session_id>.json`:
+- `input`은 원본 그대로 저장하고 해석은 앱이 한다. Claude Code가 필드를 추가해도 hook을 고칠 필요가 없다.
+- 파일명의 `ts`는 정렬용이다. 셸에서 밀리초를 얻을 수 없으므로, 같은 초 안의 순서는 앱이 `hook_event_name` 규칙(D5)으로 보완한다.
 
-```json
-{"schema":1,"session_id":"...","group":"이슈A","registered_at":"...","recap":"...","recap_at":"..."}
-```
+## D10. `/clear` 후 화면 표시: 세션 기준 카드
 
-- `seen/<session_id>.json`은 events와 같은 형식의 한 줄을 덮어쓴다.
-- `pids/<pid>`는 session_id 문자열 한 줄이다.
-- `input`은 원본을 그대로 저장하고 해석은 앱이 한다. 그래서 Claude Code가 필드를 추가해도 hook을 고칠 필요가 없다.
+- **결정**: 카드는 `session_id`마다 하나다. `/clear`하면 이전 세션은 "종료(clear)" 카드로 남고, 새 세션이 같은 그룹에 새 카드로 추가된다.
+- 새 세션은 그룹을 자동으로 이어받고, `meta.json`의 `previous`에 이전 세션 ID를 남긴다. 나중에 "이어보기" 같은 기능에 쓸 수 있다.
+- 종료 카드는 "종료 세션 접기" 토글로 숨길 수 있다.

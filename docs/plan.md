@@ -35,7 +35,7 @@
 | 3 | 그룹 모델 | 세션당 그룹은 1개다. 그룹이 없는 세션은 "미분류"로 표시한다 |
 | 4 | recap | (a) 첫 요청과 최근 요청/응답 기록 표시 (LLM 없음), (b) 스킬 호출 시 Claude가 직접 작성한 요약 |
 | 5 | 상태 | 생성중 / 응답 완료(입력 대기) / 응답 필요(권한 요청, AskUserQuestion) / 종료 |
-| 6 | 종료된 세션 | "종료" 상태로 남겨둔다. resume하면 다시 활성 상태가 된다. 사용자가 삭제할 수 있고 "종료 세션 접기" 토글을 둔다 |
+| 6 | 종료된 세션 | "종료" 상태로 남겨둔다. resume하면 다시 활성 상태가 된다. 사용자가 삭제할 수 있고 "종료 세션 접기" 토글을 둔다. `/clear` 이전 세션도 "종료(clear)" 카드로 남는다 (D10) |
 | 7 | 세션 이동 | MVP에 포함한다. 터미널마다 지원 수준이 다르다 (3.5 참고). 주 사용 터미널은 Warp |
 | 8 | 알림 | 응답 필요와 응답 완료 모두 알린다. 설정에서 각각 끌 수 있다 |
 | 9 | 서명과 배포 | SpaceSwitcher와 같은 방식이다. 자체 서명 인증서 `SpaceSwitcher Signing`을 함께 쓰고, 공증 없이 전용 tap과 postflight quarantine 해제로 배포한다 |
@@ -52,11 +52,11 @@
 ┌──────────── claude 프로세스 (터미널마다) ────────────┐
 │  이벤트 발생 → 플러그인 hook 실행 (짧게 떴다 종료)    │
 └───────────────────────┬──────────────────────────────┘
-                        │ append (JSONL)
+                        │ 이벤트 1건 = 파일 1개 (tmp → rename)
                         ▼
               ~/.session-monitor/
-              ├── sessions/<session_id>.json   등록 정보 (그룹, recap)
-              ├── events/<session_id>.jsonl    등록 세션의 이벤트 로그
+              ├── spool/<session_id>/*.json    등록 세션의 이벤트 (앱이 읽고 삭제)
+              ├── sessions/<session_id>/       등록 정보: group, recap.md, meta.json
               ├── seen/<session_id>.json       미등록 세션의 최신 상태 1건 (덮어쓰기)
               └── pids/<claude_pid>            claude PID → 현재 session_id
                         ▲
@@ -71,6 +71,7 @@
 - **추적 키는 `session_id`, 보조 키는 claude PID.**
   - PID는 hook 환경 변수 `CLAUDE_PID`에서 얻는다 (없으면 `$PPID`). 프로세스 생존 확인과 `/clear` 이후 등록 승계에 쓴다.
 - **앱과 hook은 파일로만 통신한다.** 앱이 꺼져 있어도 이벤트가 유실되지 않는다.
+- **모든 쓰기는 임시 파일 + rename이다.** 동시 실행되는 hook끼리, 또는 스킬과 앱이 서로의 쓰기를 깨뜨리지 않는다 (DECISIONS.md D9).
 - **hook은 외부 의존성 없이(jq, python 없이) POSIX shell로 작성한다.** 미등록 세션은 수 ms 안에 종료한다.
 
 ### 3.1 구독 이벤트
@@ -97,10 +98,10 @@ stdin JSON 읽기
    (입력은 compact JSON이고 session_id가 첫 필드지만, 공백 유무에 관계없이 추출한다)
 → pid = $CLAUDE_PID (없으면 $PPID)
 → SessionStart이고 source=clear이며 pids/<pid>가 등록된 세션을 가리키면
-     → 새 session_id로 등록 정보 승계 (그룹 유지)
+     → sessions/<새 id>/ 생성: group 복사, meta.json에 previous=<이전 id>
 → pids/<pid> 갱신 (SessionStart일 때)
-→ sessions/<session_id>.json이 있으면
-     → events/<session_id>.jsonl에 {schema, ts, pid, tty, term, raw 입력} 한 줄 append
+→ sessions/<session_id>/ 디렉토리가 있으면
+     → spool/<session_id>/<ts>-<pid>-<rand>.json 에 {schema, ts, pid, tty, term, raw 입력} 기록 (tmp → rename)
    없으면
      → seen/<session_id>.json을 최신 상태 1건으로 덮어쓰기
 → exit 0 (Claude 동작에는 절대 영향을 주지 않음)
@@ -246,7 +247,7 @@ M0(#8)에서 검증을 마쳤다. 결과와 근거는 `docs/DECISIONS.md`에 있
 
 1. **M0 검증**: 7장의 항목을 확인하고 이벤트 스키마를 확정한다.
 2. **M1 플러그인**: hook.sh, 등록 스킬 4종, marketplace 구성. 앱 없이 `~/.session-monitor`에 파일이 쌓이는지 확인한다.
-3. **M2 앱 코어**: 파일 감시, 상태 머신, 생존 확인, 데이터 모델 (그룹, 세션, 이벤트).
+3. **M2 앱 코어**: spool 처리, 상태 머신, 생존 확인, 데이터 모델 (그룹, 세션, 이벤트).
 4. **M3 앱 UI**: 메뉴바, 메인 윈도우, 그룹 관리, 미등록 세션 표시.
 5. **M4 알림**: 응답 필요와 응답 완료 알림, 설정.
 6. **M5 세션 이동**: 터미널 정보 수집, Warp 창 이동과 Space 전환, Terminal.app/iTerm2/tmux 탭 이동, 권한 안내.
