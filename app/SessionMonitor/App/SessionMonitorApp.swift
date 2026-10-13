@@ -8,7 +8,7 @@ struct SessionMonitorApp: App {
         MenuBarExtra {
             MenuBarView(store: monitor.store, navigation: monitor.navigation)
         } label: {
-            MenuBarLabel(summary: StatusSummary(monitor.store.sessions.values))
+            MenuBarLabel(summary: StatusSummary(monitor.store.sessions.values), navigation: monitor.navigation)
         }
         .menuBarExtraStyle(.window)
 
@@ -27,6 +27,22 @@ final class Navigation {
     var sessionID: String?
     /// Session waiting for a new group name (asked by the main window).
     var newGroupSessionID: String?
+    /// Whether the main window is on screen (set by the window itself).
+    var mainWindowVisible = false
+    /// Bumped to ask for the main window from outside SwiftUI (e.g. a notification click).
+    /// The menu bar label, which always exists, observes it and opens the window.
+    private(set) var windowRequest = 0
+
+    func isShowing(_ sessionID: String) -> Bool {
+        mainWindowVisible && self.sessionID == sessionID
+    }
+
+    /// Opens the main window on a registered session.
+    func open(sessionID: String) {
+        if self.sessionID != sessionID { sidebar = .all }
+        self.sessionID = sessionID
+        windowRequest += 1
+    }
 
     /// Shows a session in the main window, switching the sidebar if it isn't listed there.
     func show(_ session: Session) {
@@ -46,6 +62,7 @@ final class Monitor {
 
     let store: SessionStore
     let navigation = Navigation()
+    private var notifier: Notifier?
     private var watcher: DirectoryWatcher?
     private var timer: Timer?
 
@@ -59,6 +76,9 @@ final class Monitor {
         let files = MonitorFiles(root: MonitorFiles.defaultRoot)
         try? FileManager.default.createDirectory(at: files.root, withIntermediateDirectories: true)
         store = SessionStore(files: files, stateURL: SessionStore.defaultStateURL)
+        let notifier = Notifier(navigation: navigation)
+        self.notifier = notifier
+        store.onTransition = { session, before in notifier.sessionChanged(session, from: before) }
         store.refresh()
         watcher = DirectoryWatcher(url: files.root) { [weak self] in
             MainActor.assumeIsolated { self?.store.refresh() }

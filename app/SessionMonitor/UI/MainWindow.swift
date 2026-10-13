@@ -37,8 +37,14 @@ struct MainWindow: View {
             Text("'/'와 줄바꿈은 쓸 수 없습니다.")
         }
         // Menu bar app: show a Dock icon only while this window is open.
-        .onAppear { NSApp.setActivationPolicy(.regular) }
-        .onDisappear { NSApp.setActivationPolicy(.accessory) }
+        .onAppear {
+            navigation.mainWindowVisible = true
+            NSApp.setActivationPolicy(.regular)
+        }
+        .onDisappear {
+            navigation.mainWindowVisible = false
+            NSApp.setActivationPolicy(.accessory)
+        }
     }
 
     private func createGroup() {

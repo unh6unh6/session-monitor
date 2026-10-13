@@ -3,8 +3,18 @@ import SwiftUI
 /// Menu bar icon: needs-response count first, then working count.
 struct MenuBarLabel: View {
     let summary: StatusSummary
+    let navigation: Navigation
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
+        icon.onChange(of: navigation.windowRequest) {
+            openWindow(id: MainWindow.id)
+            NSApp.activate(ignoringOtherApps: true)
+        }
+    }
+
+    @ViewBuilder
+    private var icon: some View {
         if summary.needsResponse > 0 {
             Label("\(summary.needsResponse)", systemImage: "exclamationmark.bubble.fill")
                 .labelStyle(.titleAndIcon)
@@ -67,6 +77,7 @@ struct MenuBarView: View {
 
             HStack {
                 Button("메인 윈도우 열기") { openMain() }
+                NotificationSettingsMenu()
                 if !store.unregistered.isEmpty {
                     Text("미등록 \(store.unregistered.count)").font(.caption).foregroundStyle(.secondary)
                 }
@@ -115,5 +126,23 @@ struct EmptyState: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// Per-kind notification toggles (read by Notifier via NotificationPolicy.Settings.load()).
+struct NotificationSettingsMenu: View {
+    @AppStorage(NotificationPolicy.Settings.needsResponseKey) private var needsResponse = true
+    @AppStorage(NotificationPolicy.Settings.doneKey) private var done = true
+
+    var body: some View {
+        Menu {
+            Toggle("응답 필요 알림", isOn: $needsResponse)
+            Toggle("응답 완료 알림", isOn: $done)
+        } label: {
+            Image(systemName: needsResponse || done ? "bell" : "bell.slash")
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help("알림 설정")
     }
 }
