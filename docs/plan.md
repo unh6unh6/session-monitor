@@ -118,9 +118,9 @@ stdin JSON 읽기
 
 - 스킬은 `` !`${CLAUDE_PLUGIN_ROOT}/scripts/register.sh ${CLAUDE_SESSION_ID} ...` `` 형태의 실행 구문으로 등록한다. Claude가 도구를 호출하지 않아도 스킬을 불러오는 순간 등록된다 (D2).
 - 실행 구문은 권한 규칙의 적용을 받는다. `-p` 모드에서 Bash 권한이 없으면 스킬 호출 전체가 조용히 실패하므로, `allowed-tools`나 설치 안내로 스크립트 실행을 허용하는 방법을 M1에서 확정한다.
-- **다른 스킬과의 연동**: 스킬 간에 공식적인 의존성 선언은 없다. 다른 스킬의 SKILL.md에 아래 둘 중 하나를 넣는다.
-  - "작업 시작 전에 `/session-monitor:register <그룹>`을 실행하라"는 지시
-  - 등록 스크립트를 직접 호출하는 코드
+- **다른 스킬과의 연동**: 스킬 간에 공식적인 의존성 선언은 없다. 다른 스킬의 SKILL.md에 아래 둘 중 하나를 넣는다 (README "다른 스킬에서 세션 등록하기").
+  - 실행 구문 `` !`~/.session-monitor/bin/session-monitor register "${CLAUDE_SESSION_ID}" '그룹'` `` + `allowed-tools` (D12)
+  - "작업 시작 전에 `/session-monitor:register <그룹>`을 실행하라"는 지시 (recap까지 남김)
 
 ### 3.4 앱
 

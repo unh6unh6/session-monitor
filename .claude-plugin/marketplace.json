@@ -1,0 +1,13 @@
+{
+  "name": "session-monitor",
+  "owner": {
+    "name": "unh6unh6"
+  },
+  "plugins": [
+    {
+      "name": "session-monitor",
+      "source": "./plugin",
+      "description": "Report Claude Code session status to the session-monitor macOS app"
+    }
+  ]
+}

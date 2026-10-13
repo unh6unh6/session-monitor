@@ -1,0 +1,10 @@
+{
+  "name": "session-monitor",
+  "version": "0.1.0",
+  "description": "Report Claude Code session status to the session-monitor macOS app",
+  "author": {
+    "name": "unh6unh6"
+  },
+  "homepage": "https://github.com/unh6unh6/session-monitor",
+  "repository": "https://github.com/unh6unh6/session-monitor"
+}

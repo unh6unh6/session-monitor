@@ -55,12 +55,21 @@ PreToolUse(AskUserQuestion) → PermissionRequest(AskUserQuestion) [즉시] → 
   - "응답 필요"는 `PermissionRequest`로 즉시 전환한다. `Notification`은 보조 신호로 쓴다.
   - "생성중" 복귀는 `PostToolUse`로 판단한다. 도구 호출마다 실행되므로 `async: true`로 등록한다.
   - `PreToolUse`는 구독하지 않는다.
-- **미확인**:
-  - 거부했을 때의 이벤트(`PostToolUseFailure` 또는 다음 `Stop`)
-  - auto 모드에서 AskUserQuestion이 `PermissionRequest`를 내는지
-  - M1에서 `PostToolUseFailure`도 구독해 확인한다.
+- **M1에서 추가 확인** (#9):
+  - auto 모드에서도 AskUserQuestion은 `PermissionRequest`를 낸다.
+  - 권한 요청을 Esc로 거부하면 턴이 중단되고 그 뒤로 `Stop`, `PostToolUseFailure`를 포함해 아무 이벤트도 오지 않는다. 그래서 다음 `UserPromptSubmit`까지 "응답 필요"가 유지된다. 사용자가 이미 그 터미널 앞에 있는 상황이라 MVP에서는 허용한다. 개선 후보: 일정 시간 뒤 오는 `Notification(idle_prompt)`을 "입력 대기"로 처리.
 
 ## D6. hook 성능
+
+M1 구현(#9) 기준, 1회 평균 (프로세스 생성 오버헤드 포함):
+
+| 경로 | 시간 | 빈도 |
+|---|---|---|
+| 미등록 세션의 `PostToolUse` (무시) | 7.4ms | 도구 호출마다, async |
+| 미등록 세션의 `Stop` (seen 기록) | 14.0ms | 턴마다 |
+| 등록 세션의 `Stop` (spool 기록) | 15.8ms | 턴마다 |
+
+M0 측정치(필터 경로만):
 
 - 등록하지 않은 세션의 필터 경로(셸 파라미터 확장으로 session_id 추출 → 파일 존재 확인 → 종료)는 1회 평균 6.6ms였다. 측정 방식에 따른 프로세스 생성 오버헤드를 포함한 값이다. 같은 조건에서 `/usr/bin/true`는 1.2ms였다.
 - hook 입력은 compact JSON이고 `session_id`가 첫 필드였다. 다만 파서는 공백이나 필드 순서에 의존하지 않게 만든다.
@@ -99,7 +108,8 @@ append-only JSONL(`events/<session_id>.jsonl`) 방식이었으나 동시 쓰기 
 │   ├── recap.md                                recap (스킬)
 │   └── meta.json                               등록 시각, previous(clear 이전 session_id) (등록 시 1회)
 ├── seen/<session_id>.json                      미등록 세션의 최신 이벤트 1건 (tmp + rename으로 덮어쓰기)
-└── pids/<claude_pid>                           현재 session_id (tmp + rename)
+├── pids/<claude_pid>                           현재 session_id (tmp + rename)
+└── bin/session-monitor                         다른 스킬용 CLI 링크 (D12)
 ```
 
 - **쓰기 규칙**: 모든 쓰기는 같은 디렉토리의 임시 파일에 쓰고 `mv`(rename)로 교체한다. 그래서 읽는 쪽은 완성된 파일만 본다.
@@ -118,10 +128,24 @@ spool 파일 형식:
 ```
 
 - `input`은 원본 그대로 저장하고 해석은 앱이 한다. Claude Code가 필드를 추가해도 hook을 고칠 필요가 없다.
-- 파일명의 `ts`는 정렬용이다. 셸에서 밀리초를 얻을 수 없으므로, 같은 초 안의 순서는 앱이 `hook_event_name` 규칙(D5)으로 보완한다.
+- 정렬은 파일 수정 시각(APFS는 나노초 단위)을 먼저 보고, 같으면 파일명(`<epoch초>-<pid>-<hook pid>`)으로 정한다. 셸에서는 밀리초를 얻을 수 없어 파일명만으로는 같은 초 안의 순서를 알 수 없기 때문이다. 등록 직전 상태는 `0-seen.json`으로 들어간다.
 
 ## D10. `/clear` 후 화면 표시: 세션 기준 카드
 
 - **결정**: 카드는 `session_id`마다 하나다. `/clear`하면 이전 세션은 "종료(clear)" 카드로 남고, 새 세션이 같은 그룹에 새 카드로 추가된다.
 - 새 세션은 그룹을 자동으로 이어받고, `meta.json`의 `previous`에 이전 세션 ID를 남긴다. 나중에 "이어보기" 같은 기능에 쓸 수 있다.
 - 종료 카드는 "종료 세션 접기" 토글로 숨길 수 있다.
+
+## D11. 스킬의 실행 구문 권한은 allowed-tools로 허용한다
+
+- 스킬 frontmatter의 `allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/scripts/session-monitor.sh *)`가 `` !`...` `` 실행 구문에도 적용된다.
+- `-p` 모드, default 모드, auto 모드 모두에서 권한 요청 없이 등록과 recap 저장이 됐다 (M1, #9).
+- **모델이 호출할 수 있는 `register` 스킬에는 `$ARGUMENTS`를 실행 구문에 넣지 않는다.** 인자를 셸 명령에 그대로 이어 붙이면 명령 주입이 가능하기 때문이다. 그룹 지정은 Claude가 별도 명령으로 실행하고, 이 명령은 일반 권한 검사를 거친다.
+- 사용자만 호출할 수 있는 `group` 스킬(`disable-model-invocation: true`)은 인자를 실행 구문에 넣는다.
+
+## D12. 다른 스킬용 고정 경로 `~/.session-monitor/bin/session-monitor`
+
+- 플러그인 설치 경로는 버전마다 바뀌고, 다른 플러그인의 스킬에서는 `${CLAUDE_PLUGIN_ROOT}`가 그 플러그인을 가리킨다.
+- 그래서 hook이 `SessionStart` 때마다 `~/.session-monitor/bin/session-monitor`를 현재 버전의 `session-monitor.sh`로 향하는 심볼릭 링크로 갱신한다.
+- 다른 스킬은 이 경로를 실행 구문과 `allowed-tools`에 쓴다 (README 참고). 실제로 다른 플러그인 스킬에서 등록되는 것을 확인했다.
+- 이 경로는 `SESSION_MONITOR_HOME`을 따르므로, 저장 위치를 바꾸면 링크 위치도 바뀐다.
