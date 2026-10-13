@@ -24,6 +24,8 @@
 	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
 	<key>LSUIElement</key>
 	<true/>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Terminal.app에서 세션이 열린 탭을 찾아 앞으로 가져오기 위해 사용합니다.</string>
 	<key>NSHumanReadableCopyright</key>
 	<string></string>
 </dict>

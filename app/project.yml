@@ -29,6 +29,7 @@ targets:
         LSUIElement: true
         LSMinimumSystemVersion: "$(MACOSX_DEPLOYMENT_TARGET)"
         NSHumanReadableCopyright: ""
+        NSAppleEventsUsageDescription: "Terminal.app에서 세션이 열린 탭을 찾아 앞으로 가져오기 위해 사용합니다."
     entitlements:
       path: SessionMonitor/Resources/SessionMonitor.entitlements
       properties:

@@ -76,7 +76,8 @@ final class Monitor {
         let files = MonitorFiles(root: MonitorFiles.defaultRoot)
         try? FileManager.default.createDirectory(at: files.root, withIntermediateDirectories: true)
         store = SessionStore(files: files, stateURL: SessionStore.defaultStateURL)
-        let notifier = Notifier(navigation: navigation)
+        let store = store
+        let notifier = Notifier(navigation: navigation, lookup: { store.sessions[$0] })
         self.notifier = notifier
         store.onTransition = { session, before in notifier.sessionChanged(session, from: before) }
         store.refresh()

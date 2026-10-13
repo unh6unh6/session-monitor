@@ -133,6 +133,16 @@ private struct SessionList: View {
                 rows(sessions)
             }
         }
+        .contextMenu(forSelectionType: String.self) { ids in
+            if let id = ids.first, let session = store.sessions[id] ?? store.unregistered[id] {
+                SessionActions(session: session, store: store, navigation: navigation)
+            }
+        } primaryAction: { ids in
+            // Double-click (or Return) jumps to the session's terminal.
+            if let id = ids.first, let session = store.sessions[id] ?? store.unregistered[id] {
+                TerminalNavigator.focus(session)
+            }
+        }
         .overlay {
             if sessions.isEmpty {
                 if store.sessions.isEmpty && item != .unregistered {
@@ -150,7 +160,6 @@ private struct SessionList: View {
             SessionRow(session: session, showsGroup: false)
                 .tag(session.id)
                 .draggable(session.id)
-                .contextMenu { SessionActions(session: session, store: store, navigation: navigation) }
         }
     }
 }

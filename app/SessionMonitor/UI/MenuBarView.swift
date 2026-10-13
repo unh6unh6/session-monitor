@@ -57,13 +57,23 @@ struct MenuBarView: View {
                 ScrollView {
                     VStack(spacing: 0) {
                         ForEach(active.prefix(Self.maxRows)) { session in
-                            Button { open(session) } label: {
-                                SessionRow(session: session)
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 4)
-                                    .contentShape(Rectangle())
+                            HStack(spacing: 0) {
+                                Button { open(session) } label: {
+                                    SessionRow(session: session)
+                                        .padding(.leading, 12)
+                                        .padding(.vertical, 4)
+                                        .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                Button { TerminalNavigator.focus(session) } label: {
+                                    Image(systemName: "arrow.up.forward.app")
+                                        .frame(width: 28, height: 28)
+                                        .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.borderless)
+                                .help("터미널로 이동")
+                                .padding(.trailing, 6)
                             }
-                            .buttonStyle(.plain)
                         }
                         if active.count > Self.maxRows {
                             Text("외 \(active.count - Self.maxRows)개").font(.caption).foregroundStyle(.secondary).padding(8)

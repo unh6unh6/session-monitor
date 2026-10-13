@@ -85,6 +85,9 @@ struct SessionActions: View {
     let navigation: Navigation
 
     var body: some View {
+        Button("터미널로 이동") { TerminalNavigator.focus(session) }
+            .disabled(!TerminalNavigator.canFocus(session))
+        Divider()
         if session.isRegistered {
             Menu("그룹 이동") { groupItems { try store.setGroup(session.id, group: $0) } }
             Divider()

@@ -6,9 +6,11 @@ import UserNotifications
 final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     private let center = UNUserNotificationCenter.current()
     private let navigation: Navigation
+    private let lookup: (String) -> Session?
 
-    init(navigation: Navigation) {
+    init(navigation: Navigation, lookup: @escaping (String) -> Session?) {
         self.navigation = navigation
+        self.lookup = lookup
         super.init()
         center.delegate = self
         center.requestAuthorization(options: [.alert, .sound]) { granted, error in
@@ -52,8 +54,16 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
                                             withCompletionHandler completionHandler: @escaping () -> Void) {
         let sessionID = response.notification.request.content.userInfo["sessionID"] as? String
         Task { @MainActor in
-            if let sessionID { self.navigation.open(sessionID: sessionID) }
+            if let sessionID { self.open(sessionID) }
             completionHandler()
         }
+    }
+
+    /// A notification means "go answer it": jump to the terminal, or show the session in the app.
+    private func open(_ sessionID: String) {
+        if let session = lookup(sessionID), TerminalNavigator.canFocus(session) {
+            if case .failed = TerminalNavigator.focus(session) {} else { return }
+        }
+        navigation.open(sessionID: sessionID)
     }
 }

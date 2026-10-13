@@ -1,3 +1,4 @@
+import ApplicationServices
 import SwiftUI
 
 /// Everything known about one session: state, recap, last exchange, timeline, process info.
@@ -50,8 +51,17 @@ struct SessionDetail: View {
                     Text("미등록").font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
+                Button {
+                    TerminalNavigator.focus(session)
+                } label: {
+                    Label("터미널로 이동", systemImage: "arrow.up.forward.app")
+                }
+                .disabled(!TerminalNavigator.canFocus(session))
                 Menu("작업") { SessionActions(session: session, store: store, navigation: navigation) }
                     .fixedSize()
+            }
+            if session.process?.terminal.program == "WarpTerminal", !AXIsProcessTrusted() {
+                AccessibilityHint()
             }
         }
     }
@@ -133,5 +143,21 @@ private struct Timeline: View {
         case .error: return .red
         case .started, .ended: return .secondary
         }
+    }
+}
+
+/// Warp windows are found through Accessibility; without it we can only activate Warp.
+private struct AccessibilityHint: View {
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "hand.raised")
+            Text("손쉬운 사용 권한을 주면 Warp 창이 여러 개일 때도 맞는 창으로 이동합니다.")
+            Button("권한 설정") {
+                let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+                AXIsProcessTrustedWithOptions(options)
+            }
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
     }
 }
