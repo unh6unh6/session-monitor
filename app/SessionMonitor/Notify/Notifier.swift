@@ -61,9 +61,39 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
 
     /// A notification means "go answer it": jump to the terminal, or show the session in the app.
     private func open(_ sessionID: String) {
-        if let session = lookup(sessionID), TerminalNavigator.canFocus(session) {
-            if case .failed = TerminalNavigator.focus(session) {} else { return }
+        guard let session = lookup(sessionID), TerminalNavigator.canFocus(session) else {
+            navigation.open(sessionID: sessionID)
+            return
         }
-        navigation.open(sessionID: sessionID)
+        // Clicking a notification activates this app, and that activation can land after the
+        // click callback; handing focus to the terminal before it would be undone. Wait for it.
+        afterActivation { [weak self] in
+            guard let self else { return }
+            if case .failed = TerminalNavigator.focus(session) {
+                self.navigation.open(sessionID: sessionID)
+            }
+        }
+    }
+
+    static let activationTimeout: TimeInterval = 1
+
+    /// Runs `action` once this app is active (or after a short timeout if it never becomes active).
+    private func afterActivation(_ action: @escaping @MainActor () -> Void) {
+        if NSApp.isActive {
+            action()
+            return
+        }
+        var observer: NSObjectProtocol?
+        var done = false
+        let run = {
+            guard !done else { return }
+            done = true
+            if let observer { NotificationCenter.default.removeObserver(observer) }
+            action()
+        }
+        observer = NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
+        ) { _ in MainActor.assumeIsolated { run() } }
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.activationTimeout) { run() }
     }
 }
