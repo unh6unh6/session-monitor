@@ -58,7 +58,7 @@
               ├── sessions/<session_id>.json   등록 정보 (그룹, recap)
               ├── events/<session_id>.jsonl    등록 세션의 이벤트 로그
               ├── seen/<session_id>.json       미등록 세션의 최신 상태 1건 (덮어쓰기)
-              └── pids/<pid>                   claude PID → 현재 session_id
+              └── pids/<claude_pid>            claude PID → 현재 session_id
                         ▲
                         │ FSEvents 감시 + 읽기/쓰기
 ┌───────────────────────┴──────────────────────────────┐
@@ -67,9 +67,9 @@
 ```
 
 ### 핵심 원칙
-- **hook은 플러그인으로 항상 켜두고, 등록 여부는 hook 안에서 판단한다.** 스킬 frontmatter의 hook은 스킬이 활성화된 동안에만 동작하고, 세션 도중에 추가한 hook 설정은 반영되지 않을 수 있어서 이 구조를 택했다.
+- **hook은 플러그인으로 항상 켜두고, 등록 여부는 hook 안에서 판단한다.** 스킬 frontmatter의 hook은 호출 시점부터 동작하지만 `/clear`와 resume 뒤에는 사라진다 (M0 검증, DECISIONS.md D1).
 - **추적 키는 `session_id`, 보조 키는 claude PID.**
-  - PID는 프로세스 생존 확인과 `/clear` 이후 등록 승계에 쓴다.
+  - PID는 hook 환경 변수 `CLAUDE_PID`에서 얻는다 (없으면 `$PPID`). 프로세스 생존 확인과 `/clear` 이후 등록 승계에 쓴다.
 - **앱과 hook은 파일로만 통신한다.** 앱이 꺼져 있어도 이벤트가 유실되지 않는다.
 - **hook은 외부 의존성 없이(jq, python 없이) POSIX shell로 작성한다.** 미등록 세션은 수 ms 안에 종료한다.
 
@@ -77,27 +77,30 @@
 
 | hook 이벤트 | 용도 | 상태 전이 |
 |---|---|---|
-| `SessionStart` | 세션 시작, resume, `/clear` 감지. PID와 tty 기록 | 응답 완료(입력 대기) |
+| `SessionStart` | 세션 시작(`source`: startup / resume / clear / compact / fork). PID, tty, 터미널 정보 기록 | 응답 완료(입력 대기) |
 | `UserPromptSubmit` | 사용자 요청 기록 (`prompt`) | 생성중 |
-| `PreToolUse` (matcher: `AskUserQuestion`) | Claude의 질문 감지 | 응답 필요 |
-| `Notification` | 권한 요청 (`permission_prompt`) 등 | 응답 필요 |
-| `Stop` | 응답 종료. 마지막 응답은 transcript에서 추출 | 응답 완료 |
-| `SessionEnd` | 정상 종료 | 종료 |
+| `PermissionRequest` | 권한 요청과 AskUserQuestion 모두 대화상자를 띄우는 즉시 발생 (`tool_name`) | 응답 필요 |
+| `Notification` (`permission_prompt`, `idle_prompt`, `elicitation_dialog`) | 보조 신호. 권한 요청은 약 6초 늦게 옴 | 응답 필요 |
+| `PostToolUse` (`async: true`) | 권한 승인/질문 응답 후 작업 재개 감지 | 응답 필요 → 생성중 |
+| `Stop` | 응답 종료. `last_assistant_message`에 마지막 응답 포함 | 응답 완료 |
+| `StopFailure` | API 오류로 턴 종료 (`error`) | 응답 완료 (오류 표시) |
+| `SessionEnd` | 종료 (`reason`: clear / resume / logout / prompt_input_exit / other) | 종료 (`clear`면 승계 대기) |
 
-모든 도구 호출(`PreToolUse` 전체, `PostToolUse`)은 MVP에서 구독하지 않는다. 턴당 hook 실행을 2~3회로 유지하기 위해서다.
-
-**권한 승인 후 상태 복귀**: 권한을 승인한 뒤 응답 필요에서 생성중으로 돌아가는 시점은 다음 이벤트로 추정한다. 정확하게 처리하는 방법은 구현 중에 검증한다 (아래 7장 참고).
+- `PostToolUse`는 도구 호출마다 실행되므로 `async: true`로 Claude를 막지 않게 한다. hook은 상태가 "응답 필요"일 때만 의미가 있으므로 앱에서 그 외에는 무시한다.
+- `PreToolUse`는 구독하지 않는다. AskUserQuestion도 `PermissionRequest`로 잡힌다 (DECISIONS.md D5).
 
 ### 3.2 hook 동작
 
 ```
 stdin JSON 읽기
 → session_id, hook_event_name 추출
-→ SessionStart이고 source=clear이며 pids/<PPID>가 등록된 세션을 가리키면
+   (입력은 compact JSON이고 session_id가 첫 필드지만, 공백 유무에 관계없이 추출한다)
+→ pid = $CLAUDE_PID (없으면 $PPID)
+→ SessionStart이고 source=clear이며 pids/<pid>가 등록된 세션을 가리키면
      → 새 session_id로 등록 정보 승계 (그룹 유지)
-→ pids/<PPID> 갱신 (SessionStart일 때)
+→ pids/<pid> 갱신 (SessionStart일 때)
 → sessions/<session_id>.json이 있으면
-     → events/<session_id>.jsonl에 {ts, ppid, tty, raw 입력} 한 줄 append
+     → events/<session_id>.jsonl에 {schema, ts, pid, tty, term, raw 입력} 한 줄 append
    없으면
      → seen/<session_id>.json을 최신 상태 1건으로 덮어쓰기
 → exit 0 (Claude 동작에는 절대 영향을 주지 않음)
@@ -112,7 +115,8 @@ stdin JSON 읽기
 | `/session-monitor:group <그룹>` | 그룹을 변경한다 |
 | `/session-monitor:leave` | 등록을 해제한다 |
 
-- 스킬은 `${CLAUDE_SESSION_ID}` 치환으로 세션 ID를 얻고 플러그인의 스크립트를 호출한다.
+- 스킬은 `` !`${CLAUDE_PLUGIN_ROOT}/scripts/register.sh ${CLAUDE_SESSION_ID} ...` `` 형태의 실행 구문으로 등록한다. Claude가 도구를 호출하지 않아도 스킬을 불러오는 순간 등록된다 (D2).
+- 실행 구문은 권한 규칙의 적용을 받는다. `-p` 모드에서 Bash 권한이 없으면 스킬 호출 전체가 조용히 실패하므로, `allowed-tools`나 설치 안내로 스크립트 실행을 허용하는 방법을 M1에서 확정한다.
 - **다른 스킬과의 연동**: 스킬 간에 공식적인 의존성 선언은 없다. 다른 스킬의 SKILL.md에 아래 둘 중 하나를 넣는다.
   - "작업 시작 전에 `/session-monitor:register <그룹>`을 실행하라"는 지시
   - 등록 스크립트를 직접 호출하는 코드
@@ -125,7 +129,7 @@ stdin JSON 읽기
 - **메인 윈도우**
   - 사이드바: 그룹 목록, "미분류", "미등록(흐리게)", "종료 세션 접기" 토글
   - 세션 카드: 상태, 프로젝트 경로, 마지막 요청, 경과 시간
-  - 상세: recap, 요청/응답 타임라인(마지막 응답은 transcript에서 추출), 세션 정보(PID, tty, 터미널)
+  - 상세: recap, 요청/응답 타임라인(마지막 응답은 `Stop`의 `last_assistant_message`), 세션 정보(PID, tty, 터미널)
   - 세션 카드 더블클릭, "세션으로 이동" 버튼, 알림 클릭 시 해당 터미널로 이동 (3.5)
   - 그룹 이동은 드래그나 컨텍스트 메뉴로 한다. 미등록 세션의 "등록" 버튼도 있다
 - **생존 확인**: 주기적으로 `kill(pid, 0)`을 호출한다. PID가 사라졌는데 `SessionEnd`가 오지 않았으면 "종료"로 표시한다.
@@ -137,7 +141,7 @@ stdin JSON 읽기
 이동은 "어느 창/탭인지 찾기"와 "그 창이 있는 Space로 전환해서 앞으로 가져오기" 두 단계로 나뉜다.
 
 **hook이 기록하는 정보** (`SessionStart`마다)
-- claude PID, tty
+- claude PID(`CLAUDE_PID`), tty
 - 환경 변수: `TERM_PROGRAM`, `TERM_SESSION_ID`, `ITERM_SESSION_ID`, `TMUX`, `TMUX_PANE`
 - 부모 프로세스를 거슬러 올라가 찾은 터미널 앱의 PID와 번들 ID
 
@@ -145,7 +149,7 @@ stdin JSON 읽기
 
 | 터미널 | MVP 이동 수준 | 방법 |
 |---|---|---|
-| Warp (주력) | 창 단위 + Space 전환 | 터미널 앱 PID로 AX 창 목록을 얻어 창을 앞으로 가져온다. 탭과 pane 단위는 아래 조사 결과에 따라 결정 |
+| Warp (주력) | 창 단위 + Space 전환 | Warp 활성화 후 Window 메뉴의 창 항목(활성 탭 제목)으로 창을 고른다. 탭/pane 단위는 #1 |
 | Terminal.app | 탭 단위 | AppleScript로 tty가 같은 탭을 선택한다 |
 | iTerm2 | 탭/pane 단위 | AppleScript로 tty 또는 `ITERM_SESSION_ID`로 세션을 선택한다 |
 | tmux | pane 단위 + 바깥 터미널 창 | `tmux select-window`/`select-pane` 후 바깥 터미널은 위 방식으로 처리 |
@@ -155,13 +159,13 @@ stdin JSON 읽기
 - 창을 앞으로 가져와도 macOS가 해당 Space로 전환하지 않는 경우가 있다. 이때는 SpaceSwitcher의 Space 전환 코드(창이 속한 Space를 찾아 직접 전환)를 가져와 쓴다.
 - 손쉬운 사용(Accessibility) 권한이 필요하다. Terminal.app과 iTerm2 제어에는 자동화(Automation) 권한도 필요하다. 고정 서명 인증서와 번들 ID를 유지해서 업데이트 후에도 권한이 유지되게 한다.
 
-**Warp 탭 단위 이동 조사 (M0)**
-- Warp에는 AppleScript 사전이 없고, `warp://` URL scheme에도 기존 탭으로 포커스를 옮기는 기능이 확인되지 않았다.
-- 다음 방법을 시도해보고 가능한 수준을 정한다.
-  1. AX 트리에 탭이나 pane이 노출되는지
-  2. 창 제목(활성 탭 제목)과 세션 정보를 매칭할 수 있는지. Claude Code가 터미널 제목을 설정하므로 이를 활용할 수 있는지
-  3. 탭 전환 단축키를 보내며 창 제목이 일치할 때까지 순회하는 우회 방법이 실용적인지
-- 창이 여러 개일 때 맞는 창을 찾는 방법도 같이 확인한다.
+**Warp 조사 결과 (M0, DECISIONS.md D7)**
+- AppleScript 사전이 없고, `warp://` URL scheme은 기존 탭 포커스를 지원하지 않는다.
+- AX: `AXWindows`는 비어 있다. 포커스/메인 창과 Window 메뉴의 창 목록은 얻을 수 있다.
+- 창 제목은 활성 탭의 제목이고, Claude Code가 세션 이름으로 설정한다 (예: `◐ session-monitor`, 앞 글자는 스피너).
+- AX 트리에 탭과 pane은 없다. 창의 텍스트 영역에서 화면 일부 텍스트를 읽을 수 있다.
+- Tab 메뉴의 "Switch to Next Tab"은 AX로 비활성 상태로 보여 누를 수 없었다. 프로세스 지정 키 입력도 동작하지 않았다.
+- 결론: MVP는 창 단위까지. 탭/pane 단위(전역 키 입력 + 제목 매칭 순회 등)는 #1에서 계속 조사한다.
 
 ---
 
@@ -220,19 +224,21 @@ SpaceSwitcher(`docs/DECISIONS.md`의 "배포 · 서명" 절, `docs/RELEASING.md`
 
 ---
 
-## 7. 구현 전에 검증할 것
+## 7. M0 검증 결과
 
-Claude Code의 동작을 가정한 부분이다. 구현 첫 단계에서 실제로 확인하고, 결과를 DECISIONS.md에 기록한다.
+M0(#8)에서 검증을 마쳤다. 결과와 근거는 `docs/DECISIONS.md`에 있다.
 
-1. 스킬에서 `${CLAUDE_SESSION_ID}` 치환이 동작하는가?
-2. 스킬 frontmatter hook의 유효 범위. "항상 켜둔 플러그인 hook" 구조를 택한 근거를 재확인한다.
-3. `/clear` 때 새 session_id가 발급되고 `SessionStart(source: clear)`가 오는가? hook의 PPID가 같은 claude 프로세스를 가리키는가?
-4. `--resume`/`--continue` 때 session_id가 유지되는가? 유지되지 않으면 transcript 경로로 기존 세션과 연결한다.
-5. `Stop` 입력에 마지막 응답 필드가 있는가? 없으면 transcript JSONL을 파싱한다.
-6. `Notification`의 종류(`permission_prompt`, `idle_prompt` 등)와 권한 승인 후 상태 복귀 시점.
-7. hook의 실제 실행 시간 (미등록 세션 기준 목표 10ms 이하).
-8. Warp 탭/창 단위 이동 가능성 (3.5의 조사 항목).
-9. 터미널 창을 앞으로 가져올 때 Space 전환이 자동으로 되는지, SpaceSwitcher 코드가 필요한지.
+| # | 항목 | 결과 |
+|---|---|---|
+| 1 | 스킬의 `${CLAUDE_SESSION_ID}` | ✅ 동작 (실행 구문 안에서도 치환) |
+| 2 | 스킬 frontmatter hook 범위 | ⚠️ `/clear`·resume 후 사라짐 → 플러그인 hook 상시 |
+| 3 | `/clear` | ✅ 같은 PID에서 새 session_id, `SessionStart(source: clear)` |
+| 4 | resume/continue | ✅ session_id 유지, PID만 변경 |
+| 5 | 마지막 응답 | ✅ `Stop.last_assistant_message` |
+| 6 | 응답 필요와 복귀 | ✅ `PermissionRequest` 즉시 발생, 복귀는 `PostToolUse` |
+| 7 | hook 실행 시간 | ✅ 미등록 세션 약 6.6ms |
+| 8 | Warp 이동 | 창 단위까지. 탭/pane은 #1 |
+| 9 | Space 자동 전환 | 미검증. M5에서 확인 |
 
 ---
 
