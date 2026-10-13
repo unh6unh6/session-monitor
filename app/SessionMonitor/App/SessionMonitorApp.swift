@@ -6,9 +6,35 @@ struct SessionMonitorApp: App {
 
     var body: some Scene {
         MenuBarExtra {
-            MenuContent(store: monitor.store)
+            MenuBarView(store: monitor.store, navigation: monitor.navigation)
         } label: {
-            MenuBarLabel(store: monitor.store)
+            MenuBarLabel(summary: StatusSummary(monitor.store.sessions.values))
+        }
+        .menuBarExtraStyle(.window)
+
+        Window("Session Monitor", id: MainWindow.id) {
+            MainWindow(store: monitor.store, navigation: monitor.navigation)
+        }
+        .defaultSize(width: 1000, height: 640)
+    }
+}
+
+/// Selection shared by the menu bar and the main window.
+@MainActor
+@Observable
+final class Navigation {
+    var sidebar: SidebarItem? = .all
+    var sessionID: String?
+    /// Session waiting for a new group name (asked by the main window).
+    var newGroupSessionID: String?
+
+    /// Shows a session in the main window, switching the sidebar if it isn't listed there.
+    func show(_ session: Session) {
+        sessionID = session.id
+        if !session.isRegistered {
+            sidebar = .unregistered
+        } else if sidebar == .unregistered || (sidebar != .all && sidebar != (session.group.map(SidebarItem.group) ?? .ungrouped)) {
+            sidebar = .all
         }
     }
 }
@@ -19,6 +45,7 @@ final class Monitor {
     static let livenessInterval: TimeInterval = 5
 
     let store: SessionStore
+    let navigation = Navigation()
     private var watcher: DirectoryWatcher?
     private var timer: Timer?
 
@@ -38,48 +65,6 @@ final class Monitor {
         }
         timer = Timer.scheduledTimer(withTimeInterval: Self.livenessInterval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.store.refresh() }
-        }
-    }
-}
-
-// Temporary M2 views to see the core working; replaced by the real UI in M3 (#11).
-
-private struct MenuBarLabel: View {
-    let store: SessionStore
-
-    var body: some View {
-        let all = Array(store.sessions.values)
-        let needs = all.filter(\.state.needsResponse).count
-        let working = all.filter { $0.state == .working }.count
-        Text(needs > 0 ? "SM ●\(needs)" : working > 0 ? "SM ◐\(working)" : "SM")
-    }
-}
-
-private struct MenuContent: View {
-    let store: SessionStore
-
-    var body: some View {
-        let sessions = store.sessions.values.sorted { $0.updatedAt > $1.updatedAt }
-        if sessions.isEmpty {
-            Text("등록된 세션 없음")
-        }
-        ForEach(sessions) { session in
-            Text("\(session.group ?? "미분류") · \(label(session.state)) · \(session.lastPrompt?.prefix(30) ?? session.id.prefix(8))")
-        }
-        if !store.unregistered.isEmpty {
-            Divider()
-            Text("미등록 \(store.unregistered.count)개")
-        }
-        Divider()
-        Button("Quit") { NSApplication.shared.terminate(nil) }
-    }
-
-    private func label(_ state: SessionState) -> String {
-        switch state {
-        case .working: return "생성중"
-        case .idle: return "응답 완료"
-        case .needsResponse: return "응답 필요"
-        case .ended: return "종료"
         }
     }
 }

@@ -13,6 +13,8 @@ final class SessionStore {
     private(set) var sessions: [String: Session] = [:]
     /// Unregistered sessions seen by the hook, shown dimmed.
     private(set) var unregistered: [String: Session] = [:]
+    /// The plugin hook has run at least once (it creates pids/ on SessionStart).
+    private(set) var pluginDetected = false
 
     /// Called for registered sessions whose state changed: (session after, state before).
     @ObservationIgnored var onTransition: ((Session, SessionState) -> Void)?
@@ -51,6 +53,8 @@ final class SessionStore {
         changed = syncRegistrations() || changed
         changed = checkLiveness() || changed
         loadSeen()
+        let detected = FileManager.default.fileExists(atPath: files.root.appendingPathComponent("pids").path)
+        if detected != pluginDetected { pluginDetected = detected }
         if changed { save() }
     }
 
