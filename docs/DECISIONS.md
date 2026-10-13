@@ -211,3 +211,14 @@ spool 파일 형식:
   - 메뉴바 팝오버 각 행의 화살표 버튼
   - 알림 클릭(이동에 실패하면 앱에서 세션을 연다)
 - **알림 클릭 타이밍**: 알림을 클릭하면 macOS가 이 앱을 활성화하는데, 이 활성화가 클릭 처리보다 늦게 끝날 수 있다. 그러면 먼저 넘겨준 터미널 포커스를 다시 빼앗아간다(실제로 확인됨). 그래서 앱이 활성화되기를 `didBecomeActive`로 기다린 뒤 터미널로 넘긴다. 1초 안에 활성화되지 않으면 그냥 넘긴다.
+
+## D17. 배포와 라이선스 (M6)
+
+- **라이선스**: 두지 않는다. SpaceSwitcher와 같다. 공개 저장소라 코드는 볼 수 있지만, 복사·수정·재배포 권리는 부여하지 않는다(모든 권리 보유). 다른 사람의 재사용이 필요해지면 그때 추가한다.
+- **앱 배포**: SpaceSwitcher와 같은 방식이다.
+  - 자체 서명 인증서 `SpaceSwitcher Signing`으로 서명하고, 공증은 하지 않는다.
+  - Universal DMG를 GitHub Release에 올리고, 전용 tap `unh6unh6/homebrew-tap`에 `Casks/session-monitor.rb`를 둔다.
+  - cask의 `postflight_steps`에서 quarantine을 지운다.
+  - 과정은 `scripts/release.sh`로 자동화했다(docs/RELEASING.md).
+- **플러그인 배포**: 저장소 자체가 marketplace이므로 `main`에 푸시하면 바로 배포된다. 릴리스 때 `plugin.json` 버전을 앱 버전과 맞춘다.
+- **cask 부가 설정**: `caveats`로 플러그인 설치 명령을 안내한다. `zap`은 `~/.session-monitor`와 Application Support, 환경설정 파일까지 지운다.
